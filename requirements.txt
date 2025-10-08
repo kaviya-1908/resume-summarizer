@@ -6,5 +6,9 @@ gensim==4.3.3
 transformers==4.44.2
 torch==2.4.1
 sentencepiece==0.2.0
+spacy==3.7.5
+nltk==3.9.1
+
+
 
 
