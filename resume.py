@@ -1,30 +1,57 @@
 import streamlit as st
-import fitz  # PyMuPDF
-import openai
+import pdfplumber
+import docx2txt
+import re
+from gensim.summarization import summarize
+from transformers import pipeline
 
-st.set_page_config(page_title="Resume Summarizer", layout="wide")
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# --- Utility functions ---
+def read_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    return text
 
-st.title("💼 AI Resume Summarizer")
+def read_docx(file):
+    return docx2txt.process(file)
 
-uploaded_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
+def clean_text(s):
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+def extractive_summary(text, ratio=0.1):
+    try:
+        return summarize(text, ratio=ratio)
+    except ValueError:
+        return " ".join(text.split('.')[:5])
+
+# --- Streamlit UI ---
+st.set_page_config(page_title="Resume Summarizer", page_icon="📄", layout="wide")
+st.title("📄 Resume Summarizer (No API Key Needed)")
+
+uploaded_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
 
 if uploaded_file:
-    # Extract text
-    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-        text = ""
-        for page in doc:
-            text += page.get_text()
+    with st.spinner("Reading your resume..."):
+        if uploaded_file.name.endswith(".pdf"):
+            text = read_pdf(uploaded_file)
+        else:
+            text = read_docx(uploaded_file)
 
-    st.subheader("Extracted Resume Text")
-    st.text_area("", text[:1000] + "...", height=200)
+    text = clean_text(text)
+    st.subheader("Extracted Text Preview:")
+    st.text_area("", text[:1500] + ("..." if len(text) > 1500 else ""), height=200)
 
-    if st.button("Summarize Resume"):
-        prompt = f"Summarize this resume in 5 bullet points:\n\n{text[:4000]}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        summary = response.choices[0].message.content
-        st.subheader("🧠 AI Summary")
-        st.write(summary)
+    option = st.radio("Choose summarization type:", ["Extractive (Fast)", "Abstractive (AI-based)"])
+
+    if st.button("Generate Summary"):
+        if option == "Extractive (Fast)":
+            summary = extractive_summary(text)
+        else:
+            st.info("Loading local summarization model (this might take a few seconds)...")
+            summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+            summary = summarizer(text[:3000], max_length=200, min_length=50, do_sample=False)[0]['summary_text']
+
+        st.success("✅ Summary Generated!")
+        st.text_area("Resume Summary:", summary, height=250)
